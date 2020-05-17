@@ -1,4 +1,3 @@
-import numpy as np
 import os
 import torch
 import torch.nn.functional as F
@@ -52,10 +51,6 @@ class SAC(object):
         else:
             _, _, action = self.policy.sample(state)
         action = action.detach().cpu().numpy()
-        # Tongxin: add tuning
-        # lower_bound = 0
-        # add_up = 1
-        # tuning = np.append(np.tile(add_up, 3), np.tile(lower_bound, 5))
         return action[0]
 
 
@@ -75,12 +70,13 @@ class SAC(object):
             qf1_next_target, qf2_next_target = self.critic_target(next_state_batch, next_state_action)
             min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
             next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
-        
-        
+
         qf1, qf2 = self.critic(state_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
-        #print("q: " + str(self.critic(state_batch, action_batch)))
+        print(next_q_value.grad_fn)
         qf1_loss = F.mse_loss(qf1, next_q_value) # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
+        print(qf1_loss.grad_fn)
         qf2_loss = F.mse_loss(qf2, next_q_value) # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
+
         pi, log_pi, _ = self.policy.sample(state_batch)
 
         qf1_pi, qf2_pi = self.critic(state_batch, pi)

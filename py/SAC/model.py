@@ -7,7 +7,6 @@ LOG_SIG_MAX = 2
 LOG_SIG_MIN = -20
 epsilon = 1e-6
 
-
 # Initialize Policy weights
 def weights_init_(m):
     if isinstance(m, nn.Linear):
@@ -50,7 +49,7 @@ class QNetwork(nn.Module):
 
     def forward(self, state, action):
         xu = torch.cat([state, action], 1)
-
+        
         x1 = F.relu(self.linear1(xu))
         x1 = F.relu(self.linear2(x1))
         x1 = self.linear3(x1)
@@ -65,7 +64,7 @@ class QNetwork(nn.Module):
 class GaussianPolicy(nn.Module):
     def __init__(self, num_inputs, num_actions, hidden_dim):
         super(GaussianPolicy, self).__init__()
-
+        
         self.linear1 = nn.Linear(num_inputs, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
 
@@ -87,17 +86,12 @@ class GaussianPolicy(nn.Module):
         std = log_std.exp()
         normal = Normal(mean, std)
         x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
-        # use a dfferent activation function
         action = torch.tanh(x_t)
-        ## Force it to be positive
-        action = torch.clamp(action, min=0)
-        ## Added by Tony
         log_prob = normal.log_prob(x_t)
         # Enforcing Action Bound
         log_prob -= torch.log(1 - action.pow(2) + epsilon)
         log_prob = log_prob.sum(1, keepdim=True)
         return action, log_prob, torch.tanh(mean)
-
 
 class DeterministicPolicy(nn.Module):
     def __init__(self, num_inputs, num_actions, hidden_dim):
@@ -116,13 +110,14 @@ class DeterministicPolicy(nn.Module):
         mean = torch.tanh(self.mean(x))
         return mean
 
+
     def sample(self, state):
-        mean = (self.forward(state))
-        noise = self.noise.normal_(0., std=0.2)
-        ## Changed from (-0.25, 0.25)
-        noise = noise.clamp(-1, 1)
+        mean = (self.forward(state)+1)
+        noise = self.noise.normal_(0., std=0.1)
+        noise = noise.clamp(-0.25, 0.25)
         action = mean + noise
         ## Force it to be positive
         action = torch.clamp(action, min=0)
-        ## Added by Tongxin
+        ## Added by Tony
         return action, torch.tensor(0.), mean
+    
