@@ -4,7 +4,6 @@ import gym_EV
 import numpy as np
 import itertools
 import torch
-
 from gym import wrappers
 
 from keras.models import Sequential, Model
@@ -17,6 +16,8 @@ from rl.memory import SequentialMemory
 from rl.random import OrnsteinUhlenbeckProcess
 
 from DQN import DQN_train
+from DDPG import DDPG_train
+
 from NAF import NAF_train
 
 
