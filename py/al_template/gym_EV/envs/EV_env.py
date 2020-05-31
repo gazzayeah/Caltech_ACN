@@ -41,6 +41,8 @@ class EVEnv(gym.Env):
     # dictionary that registers initial battery stage == initial energy requested for current EV ast EVSE[key]. It's for dynamic storage.
     self.dic_bat = {}
 
+    self.reward_record = []
+
     # Specify the observation space
     lower_bound = np.array([0])
     # 24 is the upper bound of job time, up to 24 hours; 70 is energy upperbound in kWh
@@ -149,6 +151,7 @@ class EVEnv(gym.Env):
 
     # Update rewards: phi is the temperature coefficient for charging reward
     reward = (- penalty +  self.phi * self.charging_reward)
+    self.reward_record.append(reward)
     
     # if timestep reaches the end of the day, the episode is finished
     done = True if self.time >= 24 else False
