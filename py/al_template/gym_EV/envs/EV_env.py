@@ -105,6 +105,7 @@ class EVEnv(gym.Env):
           self.dic_bat[idx] = self.data[i, 2]
 
     # Allow non-zero actions only to those whose energy remaining is non-zero
+    action = np.array([action, action, action, action, action])
     action[np.where(self.state[:, 2] == 0)[0]] = 0
     
     # Check if sum of action violates power constraints
