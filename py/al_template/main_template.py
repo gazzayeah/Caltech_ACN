@@ -4,6 +4,7 @@ import gym_EV
 import numpy as np
 import itertools
 import torch
+import matplotlib.pyplot as plt
 from gym import wrappers
 
 from keras.models import Sequential, Model
@@ -15,6 +16,7 @@ from rl.agents import DDPGAgent
 from rl.memory import SequentialMemory
 from rl.random import OrnsteinUhlenbeckProcess
 
+from DQN import DQN_train
 from SARSA import SARSA_train
 from DDPG import DDPG_train
 
@@ -60,5 +62,8 @@ torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 env.seed(args.seed)
 
-SARSA_train(env)
+DQN_train(env)
+rewards = env.reward_record
+plt.plot(rewards)
+plt.show()
 # NAF_train(env)
