@@ -2,3 +2,7 @@
 *.h5f
 *.xml
 *.pyc
+venv/lib/python3.7/site-packages/numpy/f2py/tests/src/assumed_shape
+venv/lib/python3.7/site-packages/pip-19.0.3-py3.7.egg/pip/_vendor/packaging
+venv/lib/python3.7/site-packages/scipy
+venv

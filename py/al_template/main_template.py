@@ -16,7 +16,7 @@ from rl.agents import DDPGAgent
 from rl.memory import SequentialMemory
 from rl.random import OrnsteinUhlenbeckProcess
 
-from DDPG import DDPG_train
+from DQN import DQN_train
 from NAF import NAF_train
 
 
@@ -59,5 +59,5 @@ torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 env.seed(args.seed)
 
-DDPG_train(env)
+DQN_train(env)
 # NAF_train(env)
