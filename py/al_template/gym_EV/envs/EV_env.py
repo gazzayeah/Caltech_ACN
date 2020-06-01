@@ -25,7 +25,7 @@ class EVEnv(gym.Env):
   def __init__(self, max_ev=5, max_rate = 6, max_capacity=20):
     # Parameter for reward function
     self.gamma = 100
-    self.phi = 0
+    self.phi = 8
 
     self.state = None
     self.n_EVs = max_ev
@@ -150,6 +150,8 @@ class EVEnv(gym.Env):
 
     # Update rewards: phi is the temperature coefficient for charging reward
     reward = (- penalty +  self.phi * self.charging_reward)
+    # reward = self.phi * self.charging_reward
+    # self.reward_record.append(self.reward_record[-1] + reward)
     self.reward_record.append(reward)
     
     # if timestep reaches the end of the day, the episode is finished

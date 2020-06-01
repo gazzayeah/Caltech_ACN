@@ -5,6 +5,7 @@ import numpy as np
 import itertools
 import torch
 from gym import wrappers
+import matplotlib.pyplot as plt
 
 from keras.models import Sequential, Model
 from keras.layers import Dense, Activation, Flatten, Input, Concatenate
@@ -53,6 +54,8 @@ args = parser.parse_args()
 # Another way to use it = actions * env.action_space.high[0] -> (https://github.com/sfujim/TD3). This does the same thing.
 # (or add env._max_episode_steps to normalized_actions.py)
 env = gym.make(args.env_name)
+
+# env = gym.make(args.env_name)
 env.__init__(max_ev=MAX_EV, max_rate=MAX_RATE, max_capacity=MAX_CAPACITY)
 
 # Plant random seeds for customized initial state. This prevents wired thing from happening
@@ -60,5 +63,11 @@ torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 env.seed(args.seed)
 
-DQN_train(env)
+# env.render()
+
+DDPG_train(env)
+
+plt.plot(np.cumsum(env.reward_record))
+plt.show()
+# DQN_train(env)
 # NAF_train(env)
