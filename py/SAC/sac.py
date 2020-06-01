@@ -72,29 +72,33 @@ class SAC(object):
             next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
 
         qf1, qf2 = self.critic(state_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
-        print(next_q_value.grad_fn)
         qf1_loss = F.mse_loss(qf1, next_q_value) # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
-        print(qf1_loss.grad_fn)
         qf2_loss = F.mse_loss(qf2, next_q_value) # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
-
+        
         pi, log_pi, _ = self.policy.sample(state_batch)
 
         qf1_pi, qf2_pi = self.critic(state_batch, pi)
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
 
         policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() # Jπ = 𝔼st∼D,εt∼N[α * logπ(f(εt;st)|st) − Q(st,f(εt;st))]
-
-        self.critic_optim.zero_grad()
-        qf1_loss.backward()
-        self.critic_optim.step()
-
-        self.critic_optim.zero_grad()
-        qf2_loss.backward()
-        self.critic_optim.step()
         
         self.policy_optim.zero_grad()
         policy_loss.backward()
-        self.policy_optim.step()
+        self.policy_optim.step() 
+        #print("Policy Gradient: " + str(self.policy.linear1.bias.grad))
+        
+        self.critic_optim.zero_grad()
+        qf1_loss.backward()
+        qf2_loss.backward()
+        self.critic_optim.step()
+        #print("Q function Gradient: " + str(self.critic.linear1.bias.grad))
+        
+        '''
+        self.critic_optim.zero_grad()
+        qf2_loss.backward()
+        self.critic_optim.step()
+        '''
+        
 
         if self.automatic_entropy_tuning:
             alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()

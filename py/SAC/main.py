@@ -11,9 +11,13 @@ from normalized_actions import NormalizedActions
 from replay_memory import ReplayMemory
 import matplotlib.pyplot as plt
 import seaborn as sns; sns.set()
-
+# start with small EVSE network
 MAX_EV = 5
-MAX_LEVELS = 6
+
+# maximum power assignment for individual EVSE
+MAX_RATE = 6
+
+# maximum power assignment for whole network
 MAX_CAPACITY = 10
 
 parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
@@ -57,7 +61,7 @@ parser.add_argument('--hidden_size', type=int, default=256, metavar='N',
 parser.add_argument('--updates_per_step', type=int, default=1, metavar='N',
                     help='model updates per simulator step (default: 1)')
 
-parser.add_argument('--start_steps', type=int, default=2000, metavar='N',
+parser.add_argument('--start_steps', type=int, default= 2000, metavar='N',
                     help='Steps before which samples random actions (default: 10000)')
 
 parser.add_argument('--target_update_interval', type=int, default=1, metavar='N',
@@ -69,6 +73,7 @@ parser.add_argument('--replay_size', type=int, default=1000000, metavar='N',
 parser.add_argument('--cuda', action="store_true",
                     help='run on CUDA (default: False)')
 
+# pack up parsers
 args = parser.parse_args()
 
 # Environment
@@ -76,37 +81,47 @@ args = parser.parse_args()
 # Another way to use it = actions * env.action_space.high[0] -> (https://github.com/sfujim/TD3). This does the same thing.
 # (or add env._max_episode_steps to normalized_actions.py)
 env = gym.make(args.env_name)
-env.__init__(max_ev = MAX_EV, number_level = MAX_LEVELS, max_capacity= MAX_CAPACITY)
-
+env.__init__(max_ev = MAX_EV, max_rate = MAX_RATE, max_capacity= MAX_CAPACITY)
 
 # Plant random seeds for customized initial state. This prevents wired thing from happening
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 env.seed(args.seed)
 
+# Training Loop
+total_numsteps = 0
+updates = 0
+# local directory storing training and testing data (contains real_train and real_test folders)
+dataDirectory = "../gym-EV_data" # change this PATH to your own.
+
 # Agent
 agent = SAC(env.observation_space.shape[0], env.action_space, args)
 
 log_folder_dir = 'runs/{}_SAC_{}_{}_{}_EV={}_LVL={}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-                                                             args.policy, "autotune" if args.automatic_entropy_tuning else "", MAX_EV, MAX_LEVELS)
+                                                             args.policy, "autotune" if args.automatic_entropy_tuning else "", MAX_EV, MAX_RATE)
 #TesnorboardX
 writer = SummaryWriter(log_dir=log_folder_dir)
 
 # Memory
 memory = ReplayMemory(args.replay_size)
 
-# Training Loop
-total_numsteps = 0
-updates = 0
+# Initialize culmulative reward buffer
+ereward_buffer = []
 
+# count(1) returns 1, 2, 3 ...
 for i_episode in itertools.count(1):
+    # reward buffer for computing culmulative reward
     episode_reward = 0
     episode_steps = 0
     done = False
     # reset to time (0-24) equal to the first EV errical time, not 0!
-    state = env.reset(isTrain=True)
+    state = env.reset(dataDirectory, isTrain=True)
     
-    
+    '''
+    The while loop will break if and only if: 
+    1. episode is finished (one day charging event) 
+    or 2. iteration reaches num_steps.
+    '''
     while not done:
         if args.start_steps > total_numsteps:
             action = env.action_space.sample()  # Sample random action
@@ -115,7 +130,6 @@ for i_episode in itertools.count(1):
         
         # sac can be fired only after replay buffer is full -- enough data in the batch
         if len(memory) > args.batch_size:
-            print(memory)
             # Number of updates per step in environment
             for i in range(args.updates_per_step):
                 # Update parameters of all the networks
@@ -127,29 +141,42 @@ for i_episode in itertools.count(1):
                 writer.add_scalar('loss/entropy_loss', ent_loss, updates)
                 writer.add_scalar('entropy_temprature/alpha', alpha, updates)
                 updates += 1
-
+        
+        # obtian feedback from the envirnment
         next_state, reward, done, _, refined_act = env.step(action) # Step
+        # record number of steps taken within the current episode
         episode_steps += 1
+        # record number of steps taken in the whole learning process
         total_numsteps += 1
+        # record cumulative reward from the learning process
         episode_reward += reward
+        
 
         # Ignore the "done" signal if it comes from hitting the time horizon.
         # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
         mask = 1 if episode_steps == env._max_episode_steps else float(not done)
 
         memory.push(state, action, reward, next_state, mask) # Append transition to memory
+        
+        # Update state to next state
+        state = next_state        
 
-        state = next_state
-    print("Total espisode steps in episode (" + str(i_episode) + "): " + str(episode_steps))
+        # Print current state information
+        #print("Next State: {} || Reward: {}".format(state, reward))        
+    
+    # append culmulative reward for current episode
+    ereward_buffer.append(episode_reward)
+    # finish learning if the maximum steps of state evulution has been reached
     if total_numsteps > args.num_steps:
         break
+    # Print episode iterating information
+    print("Episode: (day) {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps, episode_steps, round(episode_reward, 2)))
 
     writer.add_scalar('reward/train', episode_reward, i_episode)
-    print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps, episode_steps, round(episode_reward, 2)))
 
     # Show performance
     if i_episode % 10 == 0 and args.eval == True:
-        state = env.reset(isTrain=False)
+        state = env.reset(dataDirectory, isTrain=False)
         episode_reward = 0
         done = False
         test_time = [env.time]
@@ -161,24 +188,29 @@ for i_episode in itertools.count(1):
             test_time.append(env.time)
             state = next_state
 
-        plt.figure()
+        plt.figure('remain_power')
         remained_power = np.array(env.charging_result)
         initial_power = np.array(env.initial_bat)
         charged_power = initial_power - remained_power
+        ub = len(remained_power) - 1
+        lb = max(ub - 50, 0)
         ind = range(len(remained_power))
-        p1 = plt.bar(ind, remained_power)
-        p2 = plt.bar(ind, charged_power, bottom=remained_power)
+        p1 = plt.bar(ind[lb:ub], remained_power[lb:ub])
+        p2 = plt.bar(ind[lb:ub], charged_power[lb:ub], bottom=remained_power[lb:ub])
         plt.legend((p1[0], p2[0]), ('Remained', 'Charged'))
         plt.savefig(log_folder_dir+'/episode='+str(i_episode)+'_remaining_power.png')
-
-        plt.close('all')
+        
+        # plot cumulative reward trend
+        plt.figure('culmulative_eward')
+        p3 = plt.plot(range(1, len(ereward_buffer)+1), ereward_buffer)
+        plt.savefig(log_folder_dir+'/cr_epi=' + str(i_episode) + '_ev=' + str(MAX_EV) + '.png')
+        plt.close('all')        
 
         writer.add_scalar('reward/test', episode_reward, i_episode)
 
         print("----------------------------------------")
         print("Test Episode: {}, reward: {}".format(i_episode, round(episode_reward, 2)))
         print("----------------------------------------")
-        '''
 
 env.close()
 

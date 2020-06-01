@@ -24,8 +24,8 @@ class EVEnv(gym.Env):
 
   def __init__(self, max_ev=5, max_rate = 6, max_capacity=20):
     # Parameter for reward function
-    self.gamma = 100
-    self.phi = 0
+    self.gamma = 1
+    self.phi = 5
 
     self.state = None
     self.n_EVs = max_ev
@@ -67,7 +67,7 @@ class EVEnv(gym.Env):
 
   def step(self, action):
     '''
-    Core function that returns next state and reward given current state and action. Constraint of system is considered for refining 
+    Core function that returns next state and reward given current state and action. Constraints of the system is considered for refining 
     original action.
     
     Args:
@@ -138,7 +138,7 @@ class EVEnv(gym.Env):
         if self.state[i, 1] > 0:
           # penalty defined as proportion of uncharged energy against initial energy requested, times gamma
           penalty += self.gamma * self.state[i, 1] / self.dic_bat[i]
-          print("Unfinished job detected at EVSE {}: {}".format(i, penalty))
+          #print("Unfinished job detected at EVSE {}: {}".format(i, penalty))
         
         # Deactivate the EV and reset
         self.state[i, :] = 0
