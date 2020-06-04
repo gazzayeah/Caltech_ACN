@@ -53,4 +53,4 @@ class Network:
         bu[0:3] = self.max_capacity
         bu[3:6] = int(self.max_capacity * (np.sqrt(3) / 4))
         
-        return {'constraint_matrix' : np.array([I3a, I3b, I3c, I2a, I2b, I2c]), 'constraint_limits' : bu, 'phases': pa}
+        return {'constraint_matrix' : np.array([I3a, I3b, I3c, I2a, I2b, I2c]), 'constraint_limits' : bu, 'phases': pa, 'phaseid': [p1, p2]}

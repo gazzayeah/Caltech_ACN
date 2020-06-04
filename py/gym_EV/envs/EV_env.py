@@ -111,11 +111,6 @@ class EVEnv(gym.Env):
 
     # Allow non-zero actions only to those whose energy remaining is non-zero
     action[np.where(self.state[:, 2] == 0)[0]] = 0
-    
-    # Check if sum of action violates power constraints
-    if np.sum(action) > self.max_capacity:
-      # if so, proportionally decrease actions that makes the sum equal to power capacity
-      action = 1.0 * action * self.max_capacity / np.sum(action)
 
     # Update remaining time and if negative, clip the value to 0
     time_result = self.state[:, 0] - self.time_interval
