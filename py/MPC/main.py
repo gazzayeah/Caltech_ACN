@@ -157,7 +157,7 @@ for i_episode in itertools.count(1):
         plt.savefig(log_folder_dir+'/episode='+str(i_episode)+'_remaining_power.png')
 
         # plot cumulative reward trend
-        plt.figure('culmulative_eward')
+        plt.figure('culmulative_reward')
         #print(env.reward_vec)
         p3 = plt.plot(range(1, len(env.reward_vec)+ 1), env.reward_vec)
         plt.savefig(log_folder_dir+'/cr_epi=' + str(i_episode) + '_ev=' + str(MAX_EV) + '.png')
