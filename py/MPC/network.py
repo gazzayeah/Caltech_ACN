@@ -46,7 +46,7 @@ class Network:
         I2b = (1 / self.turning_ratio) * (I3b - I3a)
         I2c = (1 / self.turning_ratio) * (I3c - I3b)  
         
-        # Upper bound
+        # Upper bound of inequilty
         bu = np.zeros(6)
         bu[0:3] = self.max_capacity
         bu[3:6] = int(self.max_capacity * (np.sqrt(3) / 4))
