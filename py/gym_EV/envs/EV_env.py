@@ -23,10 +23,10 @@ class EVEnv(gym.Env):
   intensity (int): to control the level of oversubscription, merging n days of input data into one day
   '''
 
-  def __init__(self, max_ev=5, max_rate = 6, max_capacity=20, intensity = 1):
+  def __init__(self, gamma = 13, phi = 1, max_ev=5, max_rate = 6, max_capacity=20, intensity = 1):
     # Parameter for reward function
-    self.gamma = 13
-    self.phi = 1
+    self.gamma = gamma
+    self.phi = phi
 
     self.state = None
     self.n_EVs = max_ev

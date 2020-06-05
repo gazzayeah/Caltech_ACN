@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
 parser.add_argument('--env-name', default="EV-v0",
                     help='name of the environment to run')
 
-parser.add_argument('--policy', default="Deterministic",
+parser.add_argument('--policy', default="Gaussian",
                     help='algorithm to use: Gaussian | Deterministic')
 
 parser.add_argument('--eval', type=bool, default=True,
@@ -202,7 +202,7 @@ for i_episode in itertools.count(1):
         
         # plot cumulative reward trend
         plt.figure('culmulative_eward')
-        p3 = plt.plot(range(1, len(ereward_buffer)+1), ereward_buffer)
+        p3 = plt.plot(range(1, len(env.reward_vec)+ 1), env.reward_vec)
         plt.savefig(log_folder_dir+'/cr_epi=' + str(i_episode) + '_ev=' + str(MAX_EV) + '.png')
         plt.close('all')        
 

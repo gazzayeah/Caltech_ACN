@@ -28,7 +28,7 @@ TURN_RATIO = 4
 # constraint type: 'SOC' or 'LINEAR'
 CONSTRAINT_TYPE = 'SOC'
 
-# toggle between LLF and MPC algorithms
+# toggle between EDF, LLF and MPC algorithms
 ACTION = 'MPC'
 
 # set parser that defines invariant global variables
@@ -42,10 +42,19 @@ parser.add_argument('--env-name', default="EV-v0",
 parser.add_argument('--seed', type=int, default=456, metavar='N',
                     help='random seed (default: 456)')
 
+# temperature coefficient gamma controls weights of penalty of failing to complete ev job
+parser.add_argument('--gamma', type=float, default = 13, metavar='N',
+                    help='control temperature of incomplete job penalty (default: 13)')
+
+#  temperature coefficient phi controls weights of reward of charging action
+parser.add_argument('--phi', type=float, default = 1, metavar='N',
+                    help='control temperature of charging reward (default: 1)')
+
 # set maximum iteration for learning episodes (max 1000000 episodes by default)
 parser.add_argument('--num_steps', type=int, default=1000000, metavar='N',
                     help='maximum number of steps (default: 1000000)')
 
+# if true, process evaluation for every 10 episode
 parser.add_argument('--eval', type=bool, default=True,
                     help='Evaluates a policy a policy every 10 episode (default:True)')
 
@@ -57,7 +66,7 @@ args = parser.parse_args()
 # Another way to use it = actions * env.action_space.high[0] -> (https://github.com/sfujim/TD3). This does the same thing.
 # (or add env._max_episode_steps to normalized_actions.py)
 env = gym.make(args.env_name)
-env.__init__(max_ev = MAX_EV, max_rate = MAX_RATE, max_capacity= MAX_CAPACITY, intensity = MAX_INTENSITY)
+env.__init__(args.gamma, args.phi, max_ev = MAX_EV, max_rate = MAX_RATE, max_capacity= MAX_CAPACITY, intensity = MAX_INTENSITY)
 
 # Plant random seeds for customized initial state. This prevents wired thing from happening
 torch.manual_seed(args.seed)
@@ -73,7 +82,6 @@ log_folder_dir = 'runs/{}_AL={}_EV={}_RATE={}_CAP={}_TYPE={}'.format(datetime.da
 dataFilePath = 'runs/data/'
 #TesnorboardX
 #writer = SummaryWriter(log_dir=log_folder_dir)
-
 # construct ev network
 N = Network(max_ev = MAX_EV, max_rate = MAX_RATE, max_capacity = MAX_CAPACITY, turning_ratio = TURN_RATIO, constraint_type = CONSTRAINT_TYPE)
 
@@ -107,6 +115,7 @@ for i_episode in itertools.count(1):
         else:
             action = A.solve(env.get_active_state)[:,0]
             action = np.array([float((str(i))) for i in action])   
+        
             
         # Print random action
         #print("Episode  ({}): episode step {} taking action: {}".format(i_episode, episode_steps, action))
@@ -192,9 +201,9 @@ def plot_creward():
     plt.plot(range(len(LLF) - 1), LLF[1:], label = 'LLF')
     plt.plot(range(len(MPC) - 1), MPC[1:], label = 'MPC')
     plt.legend()
-    plt.set_xlabel('episode')
-    plt.set_ylabel('culmulative reward')
-    plt.set_title('Performance of Deterministic Optimizer')
+    plt.xlabel('episode')
+    plt.ylabel('culmulative reward')
+    plt.title('Performance of Deterministic Optimizer')
     plt.show()
     plt.savefig(dataFilePath + 'performance_comparison.png')
     #plt.close('all')        
