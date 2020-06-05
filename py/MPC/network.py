@@ -6,8 +6,6 @@ import warnings
 class Network:
     """
     Configure virtural three-phase network of EV station
-    
-    
     """
     def __init__(self, max_ev = 5, max_rate = 6, max_capacity = 20, turning_ratio = 4, constraint_type = 'SOC'):
         self.max_ev = max_ev
@@ -16,7 +14,7 @@ class Network:
         self.max_rate = max_rate  
         self.constraint_type = constraint_type
     
-    def constraint_matrix(self):
+    def infrastructure_info(self):
         if self.constraint_type == "LINLEAR":
             return {'constraint_limits' : self.max_capacity}
         
