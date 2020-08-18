@@ -2,32 +2,31 @@ from typing import List, Union
 from collections import namedtuple
 import numpy as np
 import cvxpy as cp
+from MPC.objective_functions import *
+
 
 
 class InfeasibilityException(Exception):
     pass
 
 
-ObjectiveComponent = namedtuple('ObjectiveComponent', ['function', 'coefficient', 'kwargs'], defaults=[1, {}])
-
-def quick_charge(rates):
-    optimization_horizon = rates.shape[1]
-    c = np.array([(optimization_horizon - t) / optimization_horizon for t in range(optimization_horizon)])
-    return c @ cp.sum(rates, axis=0)
 
 class AdaptiveChargingOptimization:
     """ Base class for all MPC based charging algorithms.
 
     Args:
+        infrastructure (Dict[np.array, np.array, np.array, np.array): network infrastructure information, see class infrastructure_info in network.py
         objective (List[ObjectiveComponent]): List of components which make up the optimization objective.
-        interface (Interface): Interface providing information used by the algorithm.
-        constraint_type (str): String representing which constraint type to use. Options are 'SOC' for Second Order Cone
-            or 'LINEAR' for linearized constraints.
+        max_ev: maximum EV network can take (number of EVSEs)
+        max_rate: maximum rate an EVSE can assign
+        max_capacity: peak rate the network can deliver
+        period: time interval that new network data is retrieved
         enforce_energy_equality (bool): If True, energy delivered must be equal to energy requested for each EV.
             If False, energy delivered must be less than or equal to request.
         solver (str): Backend solver to use. See CVXPY for available solvers.
+        constraint_type: currently support SOC and LINEAR
     """
-    def __init__(self, infrastructure, objective: List[ObjectiveComponent] = [ObjectiveComponent(quick_charge)], max_ev = 5, max_rate = 6, max_capacity = 10, period = 0.1,
+    def __init__(self, infrastructure, objective: List[ObjectiveComponent], max_ev = 5, max_rate = 6, max_capacity = 10, period = 0.1,
                  enforce_energy_equality=False, solver='ECOS', constraint_type = 'SOC'):
         self.enforce_energy_equality = enforce_energy_equality
         self.solver = solver
@@ -46,21 +45,25 @@ class AdaptiveChargingOptimization:
         Args:
             rates (cp.Variable): cvxpy variable representing all charging rates. Shape should be (N, T) where N is the
                 total number of EVSEs in the system and T is the length of the optimization horizon.
-            active_sessions (List[SessionInfo]): List of SessionInfo objects for all active charging sessions.
-            evse_index (List[str]): List of IDs for all EVSEs. Index in evse_index represents the row number of that
-                EVSE in rates.
+            active_sessions (np.array[np.array(evse index, arriving time, duration, energy remaining)]): Two dimensional np.array (N * 4). 
+                N represents all current & future EVs. Index of the second dimension are [0]: EVSE index, [1] : current time or arrival time
+                [2] : job duration of charging job; [3] : current energy remaining.
+            max_rate (int): maximum rate an EVSE can assign
+            period (int): time interval that new network data is retrieved
 
         Returns:
             List[cp.Constraint]: List of lower bound constraint, upper bound constraint.
         """
         lb, ub = np.zeros(rates.shape), np.zeros(rates.shape)
-        activeNum = len(active_sessions['index'])
-        for i in range(activeNum):
-            idx = int(active_sessions["index"][i])
-            # for ev i, compute quantized remaining time
-            qtz_duration = int(active_sessions["remain_time"][i] // period) + 1
-            lb[idx, 0 : qtz_duration] = 0
-            ub[idx, 0 : qtz_duration] = max_rate          
+        activeNum = len(active_sessions)
+        for event in range(activeNum):
+            idx = active_sessions[event][0].astype(int)
+            # quantization of arrival time of current charging event
+            startTime = np.ceil(active_sessions[event][1] / period).astype(int)
+            # quantization of departure time of current charging event
+            qtzduration = np.ceil(active_sessions[event][2] / period).astype(int)
+            lb[idx, startTime : startTime + qtzduration] = 0
+            ub[idx, startTime : startTime + qtzduration] = max_rate          
             
         # To ensure feasibility, replace upper bound with lower bound when they conflict
         ub[ub < lb] = lb[ub < lb]
@@ -73,10 +76,11 @@ class AdaptiveChargingOptimization:
         Args:
             rates (cp.Variable): cvxpy variable representing all charging rates. Shape should be (N, T) where N is the
                 total number of EVSEs in the system and T is the length of the optimization horizon.
-            active_sessions (List[SessionInfo]): List of SessionInfo objects for all active charging sessions.
-            infrastructure (InfrastructureInfo): InfrastructureInfo object describing the electrical infrastructure at
-                a site.
-            period (int): Length of each discrete time period. (min)
+            active_sessions (np.array[np.array(evse index, arriving time, duration, energy remaining)]): Two dimensional np.array (N * 4). 
+                N represents all current & future EVs. Index of the second dimension are [0]: EVSE index, [1] : current time or arrival time
+                [2] : job duration of charging job; [3] : current energy remaining.
+            max_rate (float): maximum rate an EVSE can assign
+            period (float): time interval that new network data is retrieved
             enforce_energy_equality (bool): If True, energy delivered must be equal to energy requested for each EV.
                 If False, energy delivered must be less than or equal to request.
 
@@ -84,29 +88,32 @@ class AdaptiveChargingOptimization:
             List[cp.Constraint]: List of energy delivered constraints for each session.
         """
         constraints = {}
-        activeNum = len(active_sessions['index'])
-        for i in range(activeNum):
-            idx = int(active_sessions["index"][i])
-            # for ev i, compute quantized remaining time
-            qtz_duration = int(active_sessions["remain_time"][i] // period) + 1            
-            planned_energy = cp.sum(rates[idx, 0 : qtz_duration])
+        activeNum = len(active_sessions)
+        for event in range(activeNum):
+            idx = active_sessions[event][0].astype(int)
+           # quantization of arrival time of current charging event
+            startTime = np.ceil(active_sessions[event][1] / period).astype(int)
+            # quantization of departure time of current charging event
+            qtzduration = np.ceil(active_sessions[event][2] / period).astype(int)  
+            planned_energy = cp.sum(rates[idx, startTime : startTime + qtzduration])
             planned_energy *= period
-            constraint_name = f'energy_constraints.{idx}'
+            constraint_name = f'energy_constraints.{event}'
             if enforce_energy_equality:
-                constraints[constraint_name] = planned_energy == active_sessions["remain_energy"][i]
+                constraints[constraint_name] = planned_energy == active_sessions[event][3]
             else:
-                constraints[constraint_name] = planned_energy <= active_sessions["remain_energy"][i]
+                constraints[constraint_name] = planned_energy <= active_sessions[event][3]
         return constraints
 
     @staticmethod
     def infrastructure_constraint(rates: cp.Variable, infrastructure, constraint_type):
-        """ Get constraints enforcing infrastructure limits.
+        """ Get constraints enforcing infrastructure limits. Type SOC regards charging network as three-phase;
+        type LINEAR regards charging network as single phase.
 
         Args:
             rates (cp.Variable): cvxpy variable representing all charging rates. Shape should be (N, T) where N is the
                 total number of EVSEs in the system and T is the length of the optimization horizon.
-            peak_limit (Union[float, List[float], np.ndarray]): Limit on aggregate peak current. If None, no limit is
-                enforced.
+            infrastructure (Dict[np.array, np.array, np.array, np.array): network infrastructure information, see class infrastructure_info in network.py
+            constraint_type: currently support SOC and LINEAR
 
         Returns:
             List[cp.Constraint]: List of constraints, one for each bottleneck in the electrical infrastructure.
@@ -128,21 +135,35 @@ class AdaptiveChargingOptimization:
         
         return constraints
 
+
+
     def build_objective(self, rates: cp.Variable, **kwargs):
+        """
+        Set optimizing objectives by objective functions as inputs.
+        
+        Args:
+        rates (cp.Variable): cvxpy variable representing all charging rates. Shape should be (N, T) where N is the
+                total number of EVSEs in the system and T is the length of the optimization horizon.
+        
+        Returns:
+        obj (functions): objective function that takes rates as inputs.
+        """
         obj = cp.Constant(0)
         for component in self.objective_configuration:
-            obj += component.coefficient * component.function(rates)
+            obj += component.coefficient * component.function(rates, **kwargs)
         return obj
 
-    def build_problem(self, active_sessions, infrastructure, constraint_type, prev_peak:float=0):
+
+
+    def build_problem(self, active_sessions, infrastructure, constraint_type, prev_peak:float=0, **kwargs):
         """ Build parts of the optimization problem including variables, constraints, and objective function.
 
         Args:
-            active_sessions (List[SessionInfo]): List of SessionInfo objects for all active charging sessions.
-            infrastructure (InfrastructureInfo): InfrastructureInfo object describing the electrical infrastructure at
-                a site.
-            peak_limit (Union[float, List[float], np.ndarray]): Limit on aggregate peak current. If None, no limit is
-                enforced.
+            active_sessions (np.array[np.array(evse index, arriving time, duration, energy remaining)]): Two dimensional np.array (N * 4). 
+                N represents all current & future EVs. Index of the second dimension are [0]: EVSE index, [1] : current time or arrival time
+                [2] : job duration of charging job; [3] : current energy remaining.
+            infrastructure (Dict[np.array, np.array, np.array, np.array): network infrastructure information, see class infrastructure_info in network.py
+            constraint_type: currently support SOC and LINEAR
             prev_peak (float): Previous peak current draw during the current billing period.
 
         Returns:
@@ -151,8 +172,11 @@ class AdaptiveChargingOptimization:
                 'constraints': list of all constraints for the optimization problem
                 'variables': dict mapping variable name to cvxpy Variable.
         """
-        optimization_horizon = max(int(s // self.period) + 1 for s in active_sessions['remain_time'])
+        # obtain optimization horizon: minimum of 1. maximum daily time-step and 2. maximum departure time-step.
+        optimization_horizon = min(max((np.ceil(active_sessions[:, 1:3] / self.period).astype(int)).sum(axis = 1)) , int(24 / self.period))  
+        # initialize rate variable
         rates = cp.Variable(shape=(self.max_ev, optimization_horizon))
+        # initialize constraint type
         constraints = {}
 
         # Rate constraints
@@ -165,20 +189,22 @@ class AdaptiveChargingOptimization:
         constraints.update(self.infrastructure_constraint(rates, infrastructure, constraint_type))
 
         # Objective Function
-        objective = cp.Maximize(self.build_objective(rates, prev_peak=prev_peak))
+        objective = cp.Maximize(self.build_objective(rates, **kwargs))
         return {'objective': objective,
                 'constraints': constraints,
                 'variables': {'rates': rates}}
 
-    def solve(self, active_sessions, prev_peak = 0, verbose: bool = False):
+
+
+    def solve(self, active_sessions, prev_peak = 0, verbose: bool = False, **kwargs):
         """ Solve optimization problem to create a schedule of charging rates.
 
         Args:
-            active_sessions (List[SessionInfo]): List of SessionInfo objects for all active charging sessions.
-            infrastructure (InfrastructureInfo): InfrastructureInfo object describing the electrical infrastructure at
-                a site.
-            peak_limit (Union[float, List[float], np.ndarray]): Limit on aggregate peak current. If None, no limit is
-                enforced.
+            active_sessions (np.array[np.array(evse index, arriving time, duration, energy remaining)]): Two dimensional np.array (N * 4). 
+                N represents all current & future EVs. Index of the second dimension are [0]: EVSE index, [1] : current time or arrival time
+                [2] : job duration of charging job; [3] : current energy remaining.
+            infrastructure (Dict[np.array, np.array, np.array, np.array): network infrastructure information, see class infrastructure_info in network.py
+            constraint_type: currently support SOC and LINEAR
             verbose (bool): See cp.Problem.solve()
 
         Returns:
@@ -187,113 +213,11 @@ class AdaptiveChargingOptimization:
                 infrastructure.
         """
         # Here we take in arguments which describe the problem and build a problem instance.
-        if len(active_sessions['index']) == 0:
+        if len(active_sessions) == 0:
             return np.zeros((self.max_ev, 1))
-        problem_dict = self.build_problem(active_sessions, self.infrastructure, self.constraint_type, prev_peak)
+        problem_dict = self.build_problem(active_sessions, self.infrastructure, self.constraint_type, prev_peak, **kwargs)
         prob = cp.Problem(problem_dict['objective'], list(problem_dict['constraints'].values()))
         prob.solve(solver=self.solver, verbose=verbose)
         if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
             raise InfeasibilityException(f'Solve failed with status {prob.status}')
         return problem_dict['variables']['rates'].value
-
-
-# Objective Functions
-
-"""
-Inputs: 
-    rates -> cp.Variable()
-    
-Sometime needed
-    infrastructure 
-    active_sessions
-    period
-    
-Signals -> signals_interface?
-    previous_rates
-    energy_tariffs 
-    demand_charge
-    external_demand
-    signal_to_follow
-"""
-
-# ---------------------------------------------------------------------------------
-#  Objective Functions
-#
-#
-#  All objectives should take rates as their first positional argument.
-#  All other arguments should be passed as keyword arguments.
-#  All functions should except **kwargs as their last argument to avoid errors
-#  when unknown arguments are passed.
-#
-# ---------------------------------------------------------------------------------
-
-'''
-def charging_power(rates, infrastructure, **kwargs):
-    """ Returns a matrix with the same shape as rates but with units kW instead of A. """
-    voltage_matrix = np.tile(infrastructure.voltages, (rates.shape[1], 1)).T
-    return cp.multiply(rates, voltage_matrix) / 1e3
-
-
-def aggregate_power(rates, infrastructure, **kwargs):
-    """ Returns aggregate charging power for each time period. """
-    return cp.sum(charging_power(rates, infrastructure=infrastructure), axis=0)
-
-
-def get_period_energy(rates, infrastructure, period, **kwargs):
-    """ Return energy delivered in kWh during each time period and each session. """
-    power = charging_power(rates, infrastructure=infrastructure)
-    period_in_hours = period / 60
-    return power * period_in_hours
-
-
-def aggregate_period_energy(rates, infrastructure, interface, **kwargs):
-    """ Returns the aggregate energy delivered in kWh during each time period. """
-    # get charging rates in kWh per period
-    energy_per_period = get_period_energy(rates, infrastructure=infrastructure, period=interface.period)
-    return cp.sum(energy_per_period, axis=0)
-
-
-def equal_share(rates, infrastructure, interface, **kwargs):
-    return -cp.sum_squares(rates)
-
-
-def tou_energy_cost(rates, infrastructure, interface, **kwargs):
-    current_prices = interface.get_prices(rates.shape[1])    # $/kWh
-    return -current_prices @ aggregate_period_energy(rates, infrastructure, interface)
-
-
-def total_energy(rates, infrastructure, interface, **kwargs):
-    return cp.sum(get_period_energy(rates, infrastructure, interface.period))
-
-
-def peak(rates, infrastructure, interface, baseline_peak=0, **kwargs):
-    agg_power = aggregate_power(rates, infrastructure)
-    max_power = cp.max(agg_power)
-    prev_peak = interface.get_prev_peak() * infrastructure.voltages[0] / 1000
-    if baseline_peak > 0:
-        return cp.maximum(max_power, baseline_peak, prev_peak)
-    else:
-        return cp.maximum(max_power, prev_peak)
-
-
-def demand_charge(rates, infrastructure, interface, baseline_peak=0, **kwargs):
-    p = peak(rates, infrastructure, interface, baseline_peak, **kwargs)
-    dc = interface.get_demand_charge()
-    return -dc * p
-
-
-def load_flattening(rates, infrastructure, interface, external_signal=None, **kwargs):
-    if external_signal is None:
-        external_signal = np.zeros(rates.shape[1])
-    aggregate_rates_kW = aggregate_power(rates, infrastructure)
-    total_aggregate = aggregate_rates_kW + external_signal
-    return -cp.sum_squares(total_aggregate)
-'''
-
-# def smoothing(rates, active_sessions, infrastructure, previous_rates, normp=1, *args, **kwargs):
-#     reg = -cp.norm(cp.diff(rates, axis=1), p=normp)
-#     prev_mask = np.logical_not(np.isnan(previous_rates))
-#     if np.any(prev_mask):
-#         reg -= cp.norm(rates[0, prev_mask] - previous_rates[prev_mask], p=normp)
-#     return reg
-
