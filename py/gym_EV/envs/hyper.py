@@ -1,10 +1,7 @@
 # import parser package
 import argparse
 from datetime import datetime
-import pytz
 from gym_EV.envs.reward_functions import *
-# define timezone
-timezone = pytz.timezone('America/Los_Angeles')
 
 # ---------------------------------------------------------------------------------
 #  EV-gym ACN Data
@@ -16,13 +13,13 @@ timezone = pytz.timezone('America/Los_Angeles')
 # set parser that defines invariant global variables
 parser = argparse.ArgumentParser(description='ACN Data Settings')
 
-parser.add_argument('--START', type = datetime, default = timezone.localize(datetime(2018, 5, 1)),
+parser.add_argument('--START', type = datetime, default = datetime(2018, 5, 1),
                     help='starting date of training data (default: 2018, 5, 1)')
 
-parser.add_argument('--END_TRAIN', type = datetime, default = timezone.localize(datetime(2018, 6, 15)),
+parser.add_argument('--END_TRAIN', type = datetime, default = datetime(2018, 6, 15),
                     help='ending date of training data (default: 2018, 6, 15)')
 
-parser.add_argument('--END_TEST', type = datetime, default = timezone.localize(datetime(2018, 6, 22)),
+parser.add_argument('--END_TEST', type = datetime, default = datetime(2018, 6, 22),
                     help='ending date of testing data (default: 2018, 6, 22)')
 
 parser.add_argument('--PHASE_SELECT', type = bool, default = False,
@@ -54,12 +51,8 @@ parser.add_argument('--SEED', type=int, default=456, metavar='N',
                     help='random seed (default: 456)')
 
 # start with small EVSE network
-parser.add_argument('--MAX_EV', type=int, default=21, metavar='N',
+parser.add_argument('--MAX_EV', type=int, default=120, metavar='N',
                     help='maximum EVSEs in the network (default: 30)')
-
-# maximum power assignment for individual EVSE
-parser.add_argument('--MAX_RATE', type=float, default=6, metavar='G',
-                    help='maximum assignable rates for a single EVSE (default: 5)')
 
 # oversubscription level from {1, 2, 3 ...}
 parser.add_argument('--INTENSITY', type=int, default=1, metavar='N', 
@@ -73,14 +66,14 @@ parser.add_argument('--RANDOM_DATE', type=bool, default=False, metavar='B',
 gymArgs = parser.parse_args()
 
 # Define reward functions
-REWARD_FUNCTION = [RewardComponent(l2_norm_reward, 2), RewardComponent(deadline_penalty, 1)]
+REWARD_FUNCTION = [RewardComponent(l2_norm_reward, 1), RewardComponent(deadline_penalty, 0)]
 
 
 
 # ---------------------------------------------------------------------------------
-#  EV Gym Parameters
+#  Charging Netowrk Parameters
 #  
-#  Below are all arguments required for EV Gym.
+#  Below are all arguments required for EV Charging Network.
 #
 #  Structure of reward function is determined.
 # ---------------------------------------------------------------------------------
@@ -90,15 +83,23 @@ parser = argparse.ArgumentParser(description='Network Settings')
 
 # maximum power assignment for whole network
 # less than MAX_EV*MAX_RATE
-parser.add_argument('--MAX_CAPACITY', type=float, default=30, metavar='G',
-                    help='maximum assignable rates for whole network (default: 40)')
+parser.add_argument('--MAX_CAPACITY', type=float, default=10, metavar='G',
+                    help='maximum assignable capacity for whole network (default: 10)')
+
+# maximum external and variable capacity injected into the netowrk
+parser.add_argument('--MAX_EXTERNAL_CAPACITY', type=float, default=30, metavar='G',
+                    help='maximum time-varying capacity for whole network (default: 20)')
+
+# maximum charging rate vector for all EVSEs
+parser.add_argument('--MAX_RATE_VECTOR', type=list, default=gymArgs.MAX_EV * [3], metavar='G',
+                    help='maximum assignable rates for whole network (default: [3] * n_EVs)')
 
 # turning ratio of step-down transformer
 parser.add_argument('--TURN_RATIO', type=int, default=4, metavar='N', 
                     help='turning ratio of step-down transformer (default: 4)')
 
 # phase partition: deploying specified number of EVSEs to each of the phase line
-parser.add_argument('--PHASE_PARTITION', type=list, default=[7, 7], metavar='L', 
+parser.add_argument('--PHASE_PARTITION', type=list, default=[40, 40], metavar='L', 
                     help='constraint type of charging network(default: [2, 2])')
 
 # constraint type: 'SOC'(three phase) or 'LINEAR'(single phase)

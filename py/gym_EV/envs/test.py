@@ -1,26 +1,44 @@
 import argparse
 import gym
+import MPC.mpc
 import gym_EV
 import numpy as np
 import itertools
 import torch
 import datetime
 import matplotlib.pyplot as plt
-from reward_functions import *
 from hyper import *
+from gym_EV.envs.reward_functions import *
+# import MPC modules
+from MPC.objective_functions import *
+from MPC.network import *
+from MPC.mpc import *
+
+
+########################################################
+#
+# Construct charging network
+#
+######################################################## 
+# construct ev network
+NETWORK = Network(max_ev = gymArgs.MAX_EV, 
+            maxRateVec = netArgs.MAX_RATE_VECTOR, 
+            maxCapacity = netArgs.MAX_CAPACITY, 
+            turning_ratio = netArgs.TURN_RATIO, 
+            phase_partition = netArgs.PHASE_PARTITION,
+            constraint_type = netArgs.CONSTRAINT_TYPE)
 
 # Environment
 # Removing Normalized Actions. 
 # Another way to use it = actions * env.action_space.high[0] -> (https://github.com/sfujim/TD3). This does the same thing.
 # (or add env._max_episode_steps to normalized_actions.py)
 env = gym.make(gymArgs.ENV_NAME)
-env.__init__(dataArgs.START, 
-             dataArgs.END_TRAIN, 
+env.__init__(network = NETWORK, 
+             start = dataArgs.START, 
+             end = dataArgs.END_TRAIN, 
              reward = REWARD_FUNCTION, 
-             max_ev = gymArgs.MAX_EV, 
-             max_rate = gymArgs.MAX_RATE,
+             maxExternalCapacity = netArgs.MAX_EXTERNAL_CAPACITY,
              intensity = gymArgs.INTENSITY, 
-             phasePartition = netArgs.PHASE_PARTITION, 
              phase_selection = dataArgs.PHASE_SELECT, 
              isRandomDate = gymArgs.RANDOM_DATE)
 
@@ -39,7 +57,9 @@ for i_episode in itertools.count(1):
     done = False
     # reset to time (0-24) equal to the first EV errical time, not 0!
     state = env.reset()
-    
+    print(env.dailyCapacityArray)
+    #print("Daily EV Sessions: {0}".format(env.data))
+    #print("Daily EV Sessions: {0}".format(env.data[np.where((env.data[:, 0] == -1))[0] , :]))
     '''
     The while loop will break if and only if: 
     1. episode is finished (one day charging event) 
@@ -50,7 +70,8 @@ for i_episode in itertools.count(1):
         action = env.action_space.sample()  
         # Print random action
         #print("Episode  ({}): episode step {} taking action: {}".format(i_episode, episode_steps, action))
-        
+        #print(env.externalCapacity)
+        #print(env.externalCapacity == env.dailyCapacityArray[int( env.time/ 0.1)])
         '''
         Learning Algorithms Should be Invoked Here
         
@@ -60,6 +81,7 @@ for i_episode in itertools.count(1):
         '''
         
         next_state, reward, done, info = env.step(action) # Step
+        #print("New ev arrival information: {0}".format(info))
         # record number of steps taken within the current episode
         episode_steps += 1
         # record number of steps taken in the whole learning process
@@ -68,15 +90,17 @@ for i_episode in itertools.count(1):
         episode_reward += reward
         # Update state to next state
         state = next_state
-        print(env.get_active_sessions(phaseType = -1))
+        #print("Current Active Sessions: \n {0}".format(env.get_current_active_sessions(phaseType = None)))
+        #nstep = -1
+        #print("Next {0}-step Active Sessions: \n\r {1}".format(nstep, env.get_nstep_charging_session(nStep = nstep, phaseType = None)))
         
         # Print current state information
         #print("Next State: {} || Reward: {} || New EVs : {}".format(state, reward, info))         
-    # finish learning if the maximum steps of state evulution has been reached
-    if i_episode > expArgs.TRAIN_EPISODES:
-        break
     # Print episode iterating information
     print("Episode: (day) {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps, episode_steps, round(episode_reward, 2)))
+    # finish learning if the maximum steps of state evulution has been reached
+    if i_episode >= expArgs.TRAIN_EPISODES:
+        break    
     
   
     

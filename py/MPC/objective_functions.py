@@ -47,8 +47,16 @@ def quick_charge(rates, **kwargs):
     Return:
        Output of objective function.
     """
+    if "time" in kwargs.keys() and "period" in kwargs.keys():
+        currentTime = kwargs["time"]
+        period = kwargs["period"]
+    else:
+        raise ValueError("Current Time and Period Needed. \n")
+    idx = int(round(currentTime / period))
     optimization_horizon = rates.shape[1]
-    c = np.array([(optimization_horizon - t) / optimization_horizon for t in range(optimization_horizon)])
+    weightVec = np.array([(240 - t) / 240 for t in range(240)])
+    c = weightVec[idx : idx + optimization_horizon]
+    #print("Weight from: \n {0} to {1}. \n\r".format(idx, idx + optimization_horizon))
     return c @ cp.sum(rates, axis=0)
 
 

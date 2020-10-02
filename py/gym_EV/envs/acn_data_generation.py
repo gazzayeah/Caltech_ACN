@@ -2,7 +2,10 @@ import math
 from datetime import datetime
 from datetime import timedelta
 from acnportal.acndata import DataClient
+import matplotlib.pyplot as plt
+from gym_EV.envs.utils import get_moving_averages
 import numpy as np
+import pandas as pd
 from numpy import random
 
 
@@ -47,66 +50,139 @@ station_id_caltech_dict = {-1: AB_ids, 0: BC_ids, 1: CA_ids}
 
 
 
-def generate_events(start: datetime, end: datetime, token = "Js7k5LJ0qMUqESRv2PNHr2V4-09cD4A2tt6evDX5eIg", site = 'caltech', phase_selection=False):
-  """ Return EventQueue filled using events gathered from the acndata API.
-  Args:
-      See get_evs().
-  Returns:
-      EventQueue: An EventQueue filled with Events gathered through the acndata API.
+def get_solar_capacity(start: datetime, 
+                    end: datetime, 
+                    solarFilePath = './solar.csv', 
+                    maxCapacity = 20, 
+                    period = 0.1):
   """
-  evs = {1:np.array([])}
-  tmpdate = start
-  count = 1
-  while tmpdate <= end - timedelta(days = 1):
-    evs[count] = get_daily_events(tmpdate, tmpdate + timedelta(days = 1), token, site, phase_selection)
-    tmpdate = tmpdate + timedelta(days = 1)
-    count += 1
-  return evs
+  Obtain dictionary-based solar time-series, mapping timestamps (minutes) to power (Watts).
+  Default filename of solar time-series is solar.csv.
+  
+  Args:
+  solarFilePath (string): file name which solar data is retrieved from.
+  maxCapacity (float): normalizing maximum of the solar time-series.
+  
+  Returns:
+      solarCapacityDict (Dictionary(datetime: np.array)): instantaneous power provided by time-varying power source, eg. PV plant.
+  """
+  # read solar data as pandas dataframe
+  df = pd.read_csv(solarFilePath)
+  df["time"] = pd.to_datetime(df["time"])
+  # start becomes to pandas timestamp starting from 5 am
+  startTimestamp = pd.Timestamp(start + timedelta(hours = 5))
+  # start becomes to pandas timestamp ending as 7 pm
+  endTimestamp = pd.Timestamp(end - timedelta(hours = 5))
+  if len(df.index[df['time'] == startTimestamp].tolist()) == 0:
+    raise ValueError("Start Date : {0} is not in Database".format(startTimestamp))
+  if len(df.index[df['time'] == endTimestamp].tolist()) == 0:
+    raise ValueError("End Date {0} is not in Database".format(endTimestamp))
+  tmpTimestamp = startTimestamp
+  solarCapacityDict = {}
+  while tmpTimestamp < end:
+    dateIdx = datetime(tmpTimestamp.year, tmpTimestamp.month, tmpTimestamp.day)
+    dailyCapacitySeries = []
+    tmpdateIdx = dateIdx
+    for delta in range(int(round(24 / period))):
+      #print(pd.Timestamp(tmpdateIdx))
+      searchList = df.index[df['time'] == pd.Timestamp(tmpdateIdx)].tolist()
+      if len(searchList) == 0:
+        dailyCapacitySeries.append(0)
+      else:
+        dailyCapacitySeries.append(df["power (W)"][searchList[0]])
+      tmpdateIdx += timedelta(hours = period)
+    # obtain moving average series by convolution
+    dailyCapacitySeries = get_moving_averages(np.array(dailyCapacitySeries))
+    # compute normalizing scaler
+    scaler = maxCapacity / (np.max(dailyCapacitySeries) - np.min(dailyCapacitySeries))      
+    solarCapacityDict[dateIdx] = dailyCapacitySeries * scaler
+    # increment to next day 5 am
+    tmpTimestamp += pd.Timedelta(days = 1)
+  return solarCapacityDict
+  
 
 
-def get_daily_events(start, end, token, site, phase_selection):
-  """ Return a list of EVs gathered from the acndata API.
+def generate_events(start: datetime, 
+                    end: datetime, 
+                    solarCapacityDict, 
+                    token = "Js7k5LJ0qMUqESRv2PNHr2V4-09cD4A2tt6evDX5eIg", 
+                    site = 'caltech', 
+                    phase_selection = False, 
+                    period = 0.1):
+  """
+  Return a list of EV charging sessions within the specified time range gathered from the acndata API.
   Args:
       token (str): API token needed to access the acndata API.
       site (str): ACN id for the site where data should be gathered.
       start (datetime): Only return sessions which began after start.
       end (datetime): Only return session which began before end.
-      period (int): Length of each time interval. (minutes)
-      voltage (float): Voltage of the network.
-      max_battery_power (float): Default maximum charging power for batteries.
-      max_len (int): Maximum length of a session. (periods) Default None.
-      battery_params (Dict[str, object]): Dictionary containing parameters for the EV's battery. Three keys are
-          supported. If none, Battery type is used with default configuration. Default None.
-          - 'type' maps to a Battery-like class. (required)
-          - 'capacity_fn' maps to a function which takes in the the energy delivered to the car, the length of the
-              session, the period of the simulation, and the voltage of the system. It should return a tuple with
-              the capacity of the battery and the initial charge of the battery both in A*periods.
-          - 'kwargs' maps to a dictionary of keyword arguments which will be based to the Battery constructor.
-      force_feasible (bool): If True, the requested_energy of each session will be reduced if it exceeds the amount
-          of energy which could be delivered at maximum rate during the duration of the charging session.
-          Default False.
+      solarFilePath (string): file name which solar data is retrieved from.
+      maxCapacity (float): normalizing maximum of the solar time-series.
+      solarCapacityDict (Dictionary): instantaneous power provided by time-varying power source, eg. PV plant.
+      phase_selection (bool): determine if to select phase type by ACN data or uniformly random.
   Returns:
+      daily_evs (np.array(session * profile)): return all ev charging profiles in the current day.
+  """
+  evs = {1:np.array([])}
+  tmpdate = start
+  count = 1
+  # initialize random seeds
+  np.random.seed(0)
+  while tmpdate <= end - timedelta(days = 1):
+    if tmpdate in solarCapacityDict:
+      variableCapacityArray = solarCapacityDict[tmpdate]
+    else:
+      variableCapacityArray = np.zeros(int(round(24 / period)))
+    evs[count] = get_daily_events(tmpdate, tmpdate + timedelta(days = 1), token, site, variableCapacityArray, phase_selection, period)
+    tmpdate = tmpdate + timedelta(days = 1)
+    count += 1
+  return evs
+
+
+def get_daily_events(start, 
+                     end, 
+                     token, 
+                     site, 
+                     variableCapacityArray, 
+                     phase_selection, 
+                     period):
+  """ 
+  Return a list of daily EV charging sessions gathered from the acndata API.
+  Args:
+      token (str): API token needed to access the acndata API.
+      site (str): ACN id for the site where data should be gathered.
+      start (datetime): Only return sessions which began after start.
+      end (datetime): Only return session which began before end.
+      variableCapacityArray (np.array): daily instantaneous power provided by time-varying power source, eg. PV plant.
+      phase_selection (bool): determine if to select phase type by ACN data or uniformly random.
+  Returns:
+      daily_evs (np.array(session * profile)): return all ev charging profiles in the current day.
   """
   client = DataClient(token)
   docs = client.get_sessions_by_time(site, start, end)
   daily_evs = np.array([])
   for d in docs:
-    daily_evs = np.append(daily_evs, _convert_to_ev_profile(d, phase_selection))
-  if daily_evs != np.array([]):
-    evs_matrix = np.reshape(daily_evs, (-1, 4))
-    return evs_matrix[np.argsort(evs_matrix[:, 0])]
+    #print(d)
+    daily_evs = np.append(daily_evs, _convert_to_ev_profile(d, variableCapacityArray, phase_selection, period))
+  if daily_evs.size != 0:
+    evs_matrix = np.reshape(daily_evs, (-1, 6))
+    return evs_matrix[np.argsort(evs_matrix[:, 1])]
   else:
     return daily_evs
 
 
-def _convert_to_ev_profile(d, phase_selection):
+def _convert_to_ev_profile(d, 
+                           variableCapacityArray, 
+                           phase_selection,
+                           period):
   """ Convert a json document for a single charging session from acndata into an EV object.
   Args:
       d (dict): Session expressed as a dictionary. See acndata API for more details.
-      offset (int): Simulation timestamp of the beginning of the simulation.
-      See get_evs() for additional args.
+      variableCapacityArray (np.array): daily instantaneous power provided by time-varying power source, eg. PV plant.
+      phase_selection (bool): determine if to select phase type by ACN data or uniformly random.
   Returns:
-      EV: EV object with data from the acndata session doc.
+      ev_profile (np.array([5])): EV profile with data from the acndata session doc with six elements. [1] phase selection, [2] arrival time
+      [3] duration, [4] energy requested, [5] maximum power intake, [6] network capacity when ev arrives
   """
   # initialize ev profile vector
   ev_profile = np.array([])
@@ -116,30 +192,110 @@ def _convert_to_ev_profile(d, phase_selection):
     return ev_profile
   else:  
     arrival_datetime = d["connectionTime"]
+    quant_arrival_timestep = np.floor((arrival_datetime.hour + arrival_datetime.minute / 60 + arrival_datetime.second / 3600) / period) * period
+    #solar_timestep = arrival_datetime.replace(minute = int(round(arrival_datetime.minute / 6)) * 6, second = 0, microsecond = 0).timestamp()
     departure_datetime = d["disconnectTime"]
     next_datetime = arrival_datetime.replace(hour = 0, minute = 0, second = 0, microsecond = 0) + timedelta(days = 1)
     if departure_datetime <= next_datetime:
-      job_deadline = departure_datetime.timestamp() - arrival_datetime.timestamp()
-      energy_remaining = d["kWhDelivered"]
-      arrival_time = arrival_datetime.hour + arrival_datetime.minute / 60 + arrival_datetime.second / 3600
+      quant_departure_timestep = np.ceil((departure_datetime.hour + departure_datetime.minute / 60 + departure_datetime.second / 3600) / period) * period
+      energy_remaining = d["kWhDelivered"]     
     else:
-      job_deadline = next_datetime.timestamp() - arrival_datetime.timestamp()
-      energy_remaining = d["kWhDelivered"] * (job_deadline / (departure_datetime.timestamp() - arrival_datetime.timestamp()))
-      arrival_time = arrival_datetime.hour + arrival_datetime.minute / 60 + arrival_datetime.second / 3600  
-    ev_profile = np.append(ev_profile, [arrival_time, job_deadline / 3600, energy_remaining])
-    
+      quant_departure_timestep = 24
+      energy_remaining = d["kWhDelivered"] * ((next_datetime.timestamp() - arrival_datetime.timestamp()) / (departure_datetime.timestamp() - arrival_datetime.timestamp()))
+      
+    maxRate = 10 #abs(random.normal(0, 5))
+    # get realtime capacity by quantized arrival time
+    capacity = variableCapacityArray[int(round(quant_arrival_timestep / period))]
+
+    ev_profile = np.append(ev_profile, [quant_arrival_timestep, quant_departure_timestep - quant_arrival_timestep, energy_remaining, maxRate, capacity])
     if phase_selection:
       # encode ev station id as [-1, 0, 1]
       for keys in station_id_caltech_dict:
         if d["spaceID"] in station_id_caltech_dict[keys]:
-          ev_profile = np.append(ev_profile, keys)
+          ev_profile = np.append(keys, ev_profile)
           break
         else: continue  
     else:
       # choose phase line uniformly random
-      ev_profile = np.append(ev_profile, random.randint(low = -1, high = 2))
+      ev_profile = np.append(random.randint(low = -1, high = 2), ev_profile)
   
-  if ev_profile.size == 4:
+  if ev_profile.size == 6:
     return ev_profile
   else:
-    raise ValueError("Invalid EV profile output: {0}, should be in dimension of 4".format(ev_profile))
+    raise ValueError("Invalid EV profile output: {0}, should be in dimension of 6".format(ev_profile))
+  
+  
+
+
+########################################################
+#
+# Run as the main module (eg. for testing).
+#
+########################################################  
+if __name__ == "__main__":  
+  from datetime import datetime
+  def plot_TS(EVProfileMatrix, label = ['AB', 'BC', 'CA']): 
+    """
+    Plot time-series of EV profile and its one-step prediction from prediction matrix.
+  
+    Args:
+    EVProfileMatrix (np.array(n_arrival * 6)): matrix containing all ev arrival profile.
+  
+    Return:
+        predSeq (np.array(numData * EVProfile)): one-step predicted sequence.
+        realSeq (np.array(numData * EVProfile)): original testing data sequence.
+    """
+  
+    # get real and one-step predicted time-series ready to plot
+    ABMatrix = EVProfileMatrix[np.where(EVProfileMatrix[:, 0] == -1)[0], 1 : 6]
+    BCMatrix = EVProfileMatrix[np.where(EVProfileMatrix[:, 0] == 0)[0], 1 : 6]
+    CAMatrix = EVProfileMatrix[np.where(EVProfileMatrix[:, 0] == 1)[0], 1 : 6]
+    phaseMatrix = {0:ABMatrix, 1:BCMatrix, 2:CAMatrix}
+    for i in range(3):
+      fig, axs = plt.subplots(5)
+      fig.suptitle('Time Series Analysis on {0} Phase'.format(label[i]))
+      axs[0].plot(phaseMatrix[i][:, 0])
+      axs[0].set_title('Arrival Time')
+      axs[0].set(xlabel='EV Arrivals', ylabel='Arrival Time')
+      axs[1].plot(phaseMatrix[i][:, 1])
+      axs[1].set_title('Duration')
+      axs[1].set(xlabel='EV Arrivals', ylabel='Duration')
+      axs[2].plot(phaseMatrix[i][:, 2])
+      axs[2].set_title('Energy Remaining')
+      axs[2].set(xlabel='EV Arrivals', ylabel='Energy Remaining')
+      axs[3].plot(phaseMatrix[i][:, 3])
+      axs[3].set_title('Maximum Rate')
+      axs[3].set(xlabel='EV Arrivals', ylabel='Maximum Rate')
+      axs[4].plot(phaseMatrix[i][:, 4])
+      axs[4].set_title('Solar Capacity')
+      axs[4].set(xlabel='EV Arrivals', ylabel='Solar Capacity')    
+      # Hide x labels and tick labels for top plots and y ticks for right plots.
+      for ax in axs.flat:
+        ax.label_outer()
+      plt.show()
+
+
+  start = datetime(2018, 5, 25)
+  end = datetime(2018, 5, 28)
+  #c = generate_events(start, end)
+  solarCapacityDict = get_solar_capacity(start, end, solarFilePath = './solar.csv', maxCapacity = 30, period = 0.1)
+  databyDate = generate_events(start, end, solarCapacityDict)
+  dataWeekdays = {}
+  c = 0
+  for i in range(len(databyDate)):
+    if (start + timedelta(days = i)).weekday()  <= 4:
+      c += 1
+      dataWeekdays[c] = databyDate[i + 1]
+  dataMatrix = dataWeekdays[1]
+  for i in range(2, len(dataWeekdays) + 1):
+    dataMatrix = np.append(dataMatrix, dataWeekdays[i], axis = 0)
+    
+  plot_TS(dataMatrix)
+    
+  #y = np.array([])
+  #for keys in x:
+    #y = np.append(y, x[keys])
+  #plt.figure("Solar Time Series")
+  #plt.plot(y)
+  #plt.show()
+  # example output : c = {1: array([[-1.        ,  6.38833333, 12.50638889, 13.41      ,  3.        ,  15.08204433], ...]}

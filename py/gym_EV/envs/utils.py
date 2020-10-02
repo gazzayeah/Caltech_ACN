@@ -1,4 +1,5 @@
 from datetime import datetime
+import numpy as np
 import pytz
 
 
@@ -40,3 +41,17 @@ def parse_dates(doc):
       doc[field]["timestamps"] = [
               parse_http_date(ds, tz) for ds in doc[field]["timestamps"]
             ]
+      
+def get_moving_averages(data, windowSize : int = 101):
+  '''get moving averages of data with windowSize length buffer centered at each point,
+  zero padding is assumed'''
+  if windowSize % 2 != 1:
+    raise ValueError("Window size must be an odd integer, not {0}".format(windowSize))
+  else:
+    paddingSize = int((windowSize - 1)/2)
+  paddingData = np.concatenate((np.zeros(paddingSize), data, np.zeros(paddingSize)))
+  movingAverage = []
+  for i in range(len(data)):
+    movingAverage.append(np.average(paddingData[i : i + windowSize]))
+  return np.array(movingAverage)
+  
